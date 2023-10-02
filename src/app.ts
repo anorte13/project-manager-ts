@@ -14,16 +14,25 @@ class Project {
   ) {}
 }
 
-type Listener = (items: Project[]) => void;
+type Listener<T> = (items: T[]) => void;
+
+class State<T> {
+  protected listeners: Listener<T>[] = [];
+
+  addListner(listenerFn: Listener<T>) {
+    this.listeners.push(listenerFn);
+  }
+}
 
 // Project State Management
 
-class ProjectState {
-  private listeners: Listener[] = [];
+class ProjectState extends State<Project> {
   private projects: Project[] = [];
   private static instance: ProjectState;
 
-  private constructor() {}
+  private constructor() {
+    super();
+  }
   static getInstance() {
     if (this.instance) {
       return this.instance;
@@ -32,9 +41,6 @@ class ProjectState {
     return this.instance;
   }
 
-  addListner(listenerFn: Listener) {
-    this.listeners.push(listenerFn);
-  }
   addProjects(title: string, description: string, numOfPeople: number) {
     const newProject = new Project(
       Math.random().toString(),
@@ -111,84 +117,99 @@ function autobind(_: any, _2: string, descriptor: PropertyDescriptor) {
   return adjDescriptor;
 }
 
-/* Project List Class Objectt*/
-
-class ProjectList {
+//Component Base Class
+//Cannot be instanstaited
+abstract class Component<T extends HTMLElement, U extends HTMLElement> {
   templateElement: HTMLTemplateElement;
-  root: HTMLDivElement;
-  element: HTMLElement;
-  assignedProjects: Project[];
+  root: T;
+  element: U;
 
-  constructor(private type: "active" | "finished") {
+  constructor(
+    templateID: string,
+    hostElementID: string,
+    insertAtStart: boolean,
+    newElementID?: string
+  ) {
     this.templateElement = document.getElementById(
-      "project-list"
+      templateID
     )! as HTMLTemplateElement;
-    this.root = document.getElementById("app") as HTMLDivElement;
-    this.assignedProjects = [];
+    this.root = document.getElementById(hostElementID) as T;
 
     const importedNode = document.importNode(
       this.templateElement.content,
       true
     );
-    this.element = importedNode.firstElementChild as HTMLElement;
-    this.element.id = `${type}-projects`;
-
-    projectState.addListner((projects: Project[]) => {
-      this.assignedProjects = projects;
-      this.renderProjects();
-    });
-    this.attach();
-    this.renderContent();
+    this.element = importedNode.firstElementChild as U;
+    if (newElementID) {
+      this.element.id = newElementID;
+    }
+    this.attach(insertAtStart);
+  }
+  private attach(insertAtBeginning: boolean) {
+    this.root.insertAdjacentElement(
+      insertAtBeginning ? "afterbegin" : "beforeend",
+      this.element
+    );
   }
 
+  abstract configure(): void;
+  abstract renderContent(): void;
+}
+
+/* Project List Class Objectt*/
+
+class ProjectList extends Component<HTMLDivElement, HTMLElement> {
+  assignedProjects: Project[];
+
+  constructor(private type: "active" | "finished") {
+    super("project-list", "app", false, `${type}-projects`);
+    this.assignedProjects = [];
+
+    this.configure();
+    this.renderContent();
+  }
   private renderProjects() {
     const listEl = document.getElementById(
       `${this.type}-projects-list`
     )! as HTMLUListElement;
+    listEl.innerHTML = "";
     for (const prjItem of this.assignedProjects) {
       const listItem = document.createElement("li");
       listItem.textContent = prjItem.title;
       listEl.appendChild(listItem);
     }
   }
-
-  addProject() {}
-  private renderContent() {
+  configure(): void {
+    projectState.addListner((projects: Project[]) => {
+      const relevantProjects = projects.filter((prj) => {
+        if (this.type === "active") {
+          return prj.projectStatus === ProjectStatus.Active;
+        }
+        return prj.projectStatus === ProjectStatus.Finished;
+      });
+      this.assignedProjects = relevantProjects;
+      this.renderProjects();
+    });
+  }
+  renderContent() {
     const listID = `${this.type}-projects-list`;
     this.element.querySelector("ul")!.id = listID;
     this.element.querySelector("h2")!.textContent =
       this.type.toLocaleUpperCase() + "PROJECTS";
   }
-
-  private attach() {
-    this.root.insertAdjacentElement("beforeend", this.element);
-  }
 }
 
 /* Project Creation Object */
 
-class ProjectInput {
-  templateElement: HTMLTemplateElement;
-  root: HTMLDivElement;
-  element: HTMLFormElement;
+class ProjectInput extends Component<HTMLDivElement, HTMLFormElement> {
   titleInputElement: HTMLInputElement;
   descriptionInputElement: HTMLInputElement;
   peopleInputElement: HTMLInputElement;
 
   constructor() {
-    this.templateElement = document.getElementById(
-      "project-input"
-    )! as HTMLTemplateElement;
-    this.root = document.getElementById("app") as HTMLDivElement;
+    super("project-input", "app", true, "user-input");
 
-    const importedNode = document.importNode(
-      this.templateElement.content,
-      true
-    );
-    /* Grabbing form HTML Elements */
-    this.element = importedNode.firstElementChild as HTMLFormElement;
-    this.element.id = "user-input";
-
+    /* Call helper functions to append elements and handle submit to the DOM */
     this.titleInputElement = this.element.querySelector(
       "#title"
     ) as HTMLInputElement;
@@ -200,12 +221,13 @@ class ProjectInput {
     this.peopleInputElement = this.element.querySelector(
       "#people"
     ) as HTMLInputElement;
-
-    /* Call helper functions to append elements and handle submit to the DOM */
     this.configure();
-    this.attach();
   }
 
+  configure() {
+    this.element.addEventListener("submit", this.handleSubmit);
+  }
+  renderContent(): void {}
   private gatherUserInput(): [string, string, number] | void {
     const enteredTtitle = this.titleInputElement.value;
     const enteredDescription = this.descriptionInputElement.value;
@@ -256,14 +278,6 @@ class ProjectInput {
       projectState.addProjects(title, desc, people);
       this.clearInputs();
     }
-  }
-
-  private configure() {
-    this.element.addEventListener("submit", this.handleSubmit);
-  }
-
-  private attach() {
-    this.root.insertAdjacentElement("afterbegin", this.element);
   }
 }
 
